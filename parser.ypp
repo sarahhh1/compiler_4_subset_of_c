@@ -1,0 +1,153 @@
+
+%{
+	#include <iostream>
+	using namespace std;
+    #include "symantic.hpp"
+    extern int yylex();
+    extern int yylineno;
+    using namespace output;
+	void yyerror(const char*);
+	void printProductionRule(int x);
+%}
+
+%nonassoc  VOID;
+%nonassoc  INT;
+%nonassoc  BYTE;
+%nonassoc  B;
+%nonassoc  BOOL;
+%nonassoc TRUE;
+%nonassoc FALSE;
+%nonassoc RETURN;
+%nonassoc  ID;
+%nonassoc NUM;
+%nonassoc STRING;
+%nonassoc SC;
+%nonassoc COMMA;
+%nonassoc COMMENT;
+%nonassoc WHILE;
+%nonassoc BREAK;
+%nonassoc CONTINUE;
+%nonassoc LBRACE;
+%nonassoc RBRACE;
+%nonassoc S;
+
+
+%right OVERRIDE;
+%right  ASSIGN;
+%left OR;
+%left AND;
+%left RELOP;
+%left BINOP_MULT;
+%left BINOP_PLUS;
+%right NOT;
+%left LPAREN;
+%left  RPAREN;
+%right IF;
+%right ELSE;
+
+
+  %%
+        Program: {$$=new Program();} Funcs {endProg(yychar,YYEOF);}; // V
+
+        Funcs: /*epsilon*/ {} // should be empty ? // V
+        | FuncDecl Funcs    {}; // should be empty ? // V
+
+        FuncDecl: OverRide RetType ID LPAREN Formals { up_f($3,dynamic_cast<Formals*>($5)); $$ = new FuncDecl(dynamic_cast<OverRide*>($1),dynamic_cast<RetType*>($2), $3, dynamic_cast<Formals*>($5));} RPAREN LBRACE Statements RBRACE {exitFunc(dynamic_cast<RetType*>($2)); removeTable();}; // V
+
+    	OverRide: /*epsilon*/ {$$ = new OverRide(false);}
+    	| OVERRIDE {$$ = new OverRide(true);};
+
+        RetType:
+            Type {$$= new RetType(dynamic_cast<Type*>($1)->_type);} // V
+            |  VOID {$$ = new RetType("void");}; // V
+
+        Formals: /*epsilon*/ {$$= new Formals();} // V
+                | FormalsList {$$= new Formals(dynamic_cast<FormalsList*>($1));}; // V
+
+        FormalsList: FormalDecl {$$= new FormalsList(dynamic_cast<FormalsDecl*>($1));} // V
+        | FormalDecl COMMA FormalsList {$$ = new FormalsList(dynamic_cast<FormalsDecl*>($1),dynamic_cast<FormalsList*>($3));}; // V
+
+        FormalDecl: Type ID {$$= new FormalsDecl(dynamic_cast<Type*>($1),$2);}; // V
+
+        Statements:
+             Statement {$$= new Statements(dynamic_cast<Statement*>($1));} // V
+            | Statements Statement {$$= new Statements(dynamic_cast<Statements*>($1) ,dynamic_cast<Statement*> ($2));}; // V
+
+
+
+
+        Statement:
+            LBRACE {addTable();} Statements RBRACE { $$= new Statement(dynamic_cast<Statements*>($3));removeTable();} // Vvv
+            | Type ID SC {$$ = new Statement(dynamic_cast<Type*>($1),$2);} // V
+            | Type ID ASSIGN Exp SC {$$ = new Statement(dynamic_cast<Type*>($1), $2, dynamic_cast<Exp*>($4));}// V
+            | ID ASSIGN Exp SC {$$ = new Statement($1, dynamic_cast<Exp*>($3));}// V
+            | Call SC {$$= new Statement(dynamic_cast<Call*>($1));}// V
+            | RETURN SC {$$ = new Statement("void");} // V
+            | RETURN Exp SC {$$ = new Statement(dynamic_cast<Exp*>($2));}//V
+
+            | IF LPAREN ISBOOL RPAREN OS M Statement  {$$ = new Statement(dynamic_cast<Statement*>($7)); removeTable(); backpatching_for_if(dynamic_cast<M*>($6),dynamic_cast<IsBool*>($3));} //V
+            | IF LPAREN ISBOOL RPAREN OS M Statement  ELSE {$$ = new Statement(dynamic_cast<Statement*>($7));removeTable();} OS  N Statement   {removeTable();$$= backpatching_for_if_else(dynamic_cast<M*>($6),dynamic_cast<N*>($11),dynamic_cast<IsBool*>($3),dynamic_cast<Statement*>($7),dynamic_cast<Statement*>($12));}// V
+
+
+
+            | WHILE LPAREN N {$$= InParserCHANGEinWhile(true);addTable();} ISBOOL1 RPAREN {$$=createPrev(dynamic_cast<IsBool*>($5)->is_bool_exp);}  Statement {removeTable();$$= InParserCHANGEinWhile(false,dynamic_cast<N*>($3),dynamic_cast<Prev*>($7),dynamic_cast<Statement*>($8));} // V
+
+            | BREAK SC  {$$ = new Statement($1);}  // V
+            | CONTINUE SC  {$$ = new Statement($1);}; // V
+
+        OS:
+            {addTable();} // V
+
+        ISBOOL:
+            Exp {check_bool($1);$$ = new IsBool(dynamic_cast<Exp*>($1),true);} // V
+        ISBOOL1:
+        Exp {check_bool($1);$$ = new IsBool(dynamic_cast<Exp*>($1),false);} // V
+        Call: //V
+            ID LPAREN ExpList RPAREN  {$$ = new Call($1, dynamic_cast<ExpList*>($3));} // V
+            | ID LPAREN RPAREN  {$$= new Call($1);}; // V
+
+        ExpList: // V
+            Exp  { $$ = new ExpList(dynamic_cast<Exp*>($1));} // V
+            | Exp COMMA ExpList {$$ = new ExpList(dynamic_cast<Exp*>($1),dynamic_cast<ExpList*>($3));}; // V
+
+        Type: // V
+                INT  {$$= new Type("int");} // V
+                | BYTE   {$$= new Type("byte");} // V
+                | BOOL  {$$= new Type("bool");}; // V
+
+
+        Exp:
+                 LPAREN Exp RPAREN  {$$= new Exp(dynamic_cast<Exp*>($2));} // V
+
+
+                 | Exp BINOP_MULT Exp  {$$= new Exp("binop_mult",dynamic_cast<Exp*>($1) ,dynamic_cast<Exp*>($3),$2);} // V
+                 | Exp BINOP_PLUS Exp  {$$= new Exp("binop_plus",dynamic_cast<Exp*>($1) ,dynamic_cast<Exp*>($3),$2);} // V
+                 | Exp AND {$$= createPrev(dynamic_cast<Exp*> ($1));} Exp  {$$= new Exp(string("and"),dynamic_cast<Exp*>($1) ,dynamic_cast<Exp*>($4),$2, dynamic_cast<Prev*>($3));} // V
+                 | Exp OR {$$=createPrev(dynamic_cast<Exp*> ($1));} Exp  {$$= new Exp(string("or"),dynamic_cast<Exp*>($1) ,dynamic_cast<Exp*>($4),$2, dynamic_cast<Prev*>($3));} // V
+                 | Exp RELOP Exp  {$$= new Exp(string("relop"),dynamic_cast<Exp*>($1) ,dynamic_cast<Exp*>($3),$2);} // V
+                 | ID  {$$= new Exp($1);}// V
+                 | Call  { $$ = new Exp(dynamic_cast<Call*>($1));}// V
+                 | NUM  {$$= new Exp("int",$1);}//1 V
+                 | NUM B  { is_legale_byte( $1); $$= new Exp("byte",$1);}//1 V
+                 | STRING  {$$= new Exp(string("string"),$1);}//1 V
+                 | TRUE  {$$= new Exp(string("bool"),"true");}//1 V
+                 | FALSE  {$$= new Exp(string("bool"),"false");}//1 V
+                 | NOT Exp  {is_it_bool(dynamic_cast<Exp*>($2));$$= new Exp(dynamic_cast<Exp*>($2),true);} // V
+                 | LPAREN Type RPAREN Exp {$$= new Exp(dynamic_cast<Type*>($2),dynamic_cast<Exp*>($4));}; //v
+
+        N:      {$$ = new N();}; // V
+        M:      {$$ = new M();}; // V
+
+  %%
+
+
+int main() {
+	return yyparse();
+}
+
+void yyerror(const char* err) {
+     errorSyn(yylineno);
+     exit(0);
+     }
+
+void printProductionRule(int x) {};
